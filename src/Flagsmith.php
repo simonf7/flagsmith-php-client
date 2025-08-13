@@ -104,7 +104,7 @@ class Flagsmith
             $this->environmentTtl = $environmentTtl ?? $this->environmentTtl;
             $this->enableLocalEvaluation = !is_null($environmentTtl);
             $this->retries = $retries ?? new Retry(3);
-            $this->analyticsProcessor = $enableAnalytics ? new AnalyticsProcessor($apiKey, $host) : null;
+            $this->analyticsProcessor = $enableAnalytics ? new AnalyticsProcessor($apiKey, $this->host) : null;
             $this->defaultFlagHandler = $defaultFlagHandler ?? $this->defaultFlagHandler;
 
             //We default to using Guzzle for the HTTP client (as this is how it worked in 1.0)
@@ -546,18 +546,28 @@ class Flagsmith
         bool $skipCache = false,
         ?int $ttl = null
     ) {
+        $logAttributes = [
+            '@method' => $method,
+            '@uri' => $uri,
+            '@body' => json_encode($body),
+            '@localEvaluation' => $this->enableLocalEvaluation ? 'true' : 'false',
+        ];
+
         if (!$this->hasCache()) {
+            \Drupal::logger('flagsmith')->debug('[no cache] @method @uri', $logAttributes);
             return $this->call($method, $uri, $body);
         }
 
         if (!$skipCache && !$this->skipCache()) {
             $cachedCall = $this->cache->get($cacheKey);
             if (\is_array($cachedCall) || \is_object($cachedCall)) {
+                \Drupal::logger('flagsmith')->debug('[cache hit] @method @uri', $logAttributes);
                 return $cachedCall;
             }
         }
 
         try {
+            \Drupal::logger('flagsmith')->debug('[cache miss] @method @uri', $logAttributes);
             $response = $this->call($method, $uri, $body);
             $this->cache->set($cacheKey, $response, $ttl);
 
@@ -566,6 +576,7 @@ class Flagsmith
             if ($this->useCacheAsFailover) {
                 $cachedCall = $this->cache->get($cacheKey);
                 if (\is_array($cachedCall) || \is_object($cachedCall)) {
+                    \Drupal::logger('flagsmith')->debug('[failover] @method @uri', $logAttributes);
                     return $cachedCall;
                 }
             }
